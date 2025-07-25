@@ -9,6 +9,7 @@ from sklearn.metrics import classification_report, accuracy_score
 from data_fetcher import DataFetcher
 from data_preprocessor import DataPreprocessor
 from feature_engineering import FeatureEngineering
+from quant_trading_system.utils.config import sanitize_feature_names
 
 class ModelTrainer:
     """
@@ -83,6 +84,10 @@ class ModelTrainer:
         """
         print("\nSplitting data into training and testing sets (no shuffle)...")
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, shuffle=False)
+
+        # Sanitize feature names for LightGBM compatibility
+        X_train.columns = sanitize_feature_names(X_train.columns)
+        X_test.columns = sanitize_feature_names(X_test.columns)
 
         print("Training LightGBM classifier...")
         self.model = lgb.LGBMClassifier(random_state=42)

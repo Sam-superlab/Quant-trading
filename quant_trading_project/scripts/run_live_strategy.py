@@ -60,9 +60,32 @@ def run_live_strategy():
     data_with_features['Future_Return'] = data_with_features['Returns'].shift(-1)
     data_with_features['Target'] = (data_with_features['Future_Return'] > 0).astype(int)
     
-    # The last row will have a NaN target, which is what we want to predict
-    data_to_predict = data_with_features[data_with_features['Target'].isna()]
-    training_data = data_with_features.dropna()
+    # Check if we have data for today or the most recent trading day
+    latest_date = data_with_features.index.max()
+    
+    # Handle NaT (Not a Time) values in the index
+    if pd.isna(latest_date):
+        print("Error: Invalid dates found in data. Cleaning data...")
+        # Remove rows with NaT index
+        data_with_features = data_with_features.dropna()
+        if data_with_features.empty:
+            print("Error: No valid data remaining after cleaning.")
+            return
+        latest_date = data_with_features.index.max()
+    
+    print(f"Latest available data date: {latest_date.date()}")
+    print(f"Today's date: {datetime.now().date()}")
+    
+    # If we don't have today's data, use the most recent available data for prediction
+    if latest_date.date() < datetime.now().date():
+        print(f"Using most recent available data ({latest_date.date()}) for prediction")
+        # Use the last row for prediction instead of looking for NaN target
+        data_to_predict = data_with_features.iloc[[-1]]  # Last row
+        training_data = data_with_features.iloc[:-1]  # All but last row
+    else:
+        # We have today's data, use the standard approach
+        data_to_predict = data_with_features[data_with_features['Target'].isna()]
+        training_data = data_with_features.dropna()
 
     y_train = training_data['Target']
     cols_to_drop = ['Open', 'High', 'Low', 'Close', 'Volume', 'Returns', 'Future_Return', 'Target']
@@ -82,9 +105,14 @@ def run_live_strategy():
     # Predict the probability for today
     prediction_proba = model.predict_proba(X_predict)
     probability_of_up = prediction_proba[0][1] # Probability of class '1' (Up)
+    prediction_date = X_predict.index[0].date()
     
-    print(f"Prediction for {X_predict.index[0].date()}:")
+    print(f"Prediction for {prediction_date}:")
     print(f"  - Probability of price going UP: {probability_of_up:.2%}")
+    
+    # If we're predicting for a past date, add a note
+    if prediction_date < datetime.now().date():
+        print(f"  - Note: Predicting for {prediction_date} (most recent available data)")
 
     # --- 3. Trade Execution Logic ---
     print("\n" + "="*50)

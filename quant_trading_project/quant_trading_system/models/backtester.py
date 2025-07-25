@@ -3,129 +3,127 @@
 import pandas as pd
 import lightgbm as lgb
 from backtesting import Backtest, Strategy
-from sklearn.model_selection import train_test_split
+from datetime import datetime, timedelta
+import numpy as np
+import re
 
-# Import our existing modules to build the full pipeline
-from data_fetcher import DataFetcher
-from data_preprocessor import DataPreprocessor
-from feature_engineering import FeatureEngineering
+# Import our existing modules
+from quant_trading_system.data.data_fetcher import DataFetcher
+from quant_trading_system.data.data_preprocessor import DataPreprocessor
+from quant_trading_system.features.feature_engineering import FeatureEngineering
+from quant_trading_system.utils.config import config, sanitize_feature_names
 
 class MLStrategy(Strategy):
     """
     A trading strategy that uses a pre-trained machine learning model
-    to make trading decisions. This class is designed to work with the
-    backtesting.py library.
+    to make trading decisions.
     """
     def init(self):
-        """
-        Initialize the strategy. We receive the model's predictions
-        as a data series.
-        """
-        # The `backtesting.py` library automatically aligns the data.
-        # We will pass the predictions as an additional data column.
         self.predictions = self.I(lambda x: x, self.data.df['Predictions'])
 
     def next(self):
-        """
-        The main trading logic that is executed on each bar of data.
-        """
-        # If the model predicts an "Up" move (1) and we are not in a position, buy.
         if self.predictions[-1] == 1 and not self.position:
             self.buy()
-        # If the model predicts a "Down/Same" move (0) and we are in a position, sell.
         elif self.predictions[-1] == 0 and self.position:
             self.position.close()
 
-def run_backtest():
+def run_backtest(ticker, cash, commission):
     """
-    Main function to execute the entire pipeline from data fetching to backtesting.
+    UPGRADED to a Walk-Forward Backtester with fixes for LightGBM.
     """
-    # --- Setup: This pipeline uses all the modules we've built so far ---
-    user_api_key = 'd21bk3pr01qkdupiodggd21bk3pr01qkdupiodh0'
-    fetcher = DataFetcher(finnhub_api_key=user_api_key)
+    fetcher = DataFetcher(finnhub_api_key=config.FINNHUB_API_KEY)
     preprocessor = DataPreprocessor()
     
-    ticker = 'TSLA'
-    start = '2021-01-01'
-    end = '2023-12-31'
+    start_date = (datetime.now() - timedelta(days=config.TRAINING_HISTORY_YEARS * 365)).strftime('%Y-%m-%d')
+    end_date = datetime.now().strftime('%Y-%m-%d')
 
-    # --- 1. Fetch, Preprocess, and Engineer Features ---
-    print("\n" + "="*50)
-    print("STEP 1: Data Pipeline Execution")
-    print("="*50)
-    market_data = fetcher.get_market_data(ticker, start_date=start, end_date=end)
+    # --- 1. Data Pipeline ---
+    print(f"Backtester: Running data pipeline for {ticker}...")
+    market_data = fetcher.get_market_data(ticker, start_date=start_date, end_date=end_date)
     if market_data is None:
-        print("Could not fetch market data. Exiting.")
-        return
+        return None, "Could not fetch market data."
 
     clean_data = preprocessor.handle_missing_values(market_data, method='ffill')
     
     feature_generator = FeatureEngineering(clean_data)
-    feature_generator.add_moving_averages()
-    feature_generator.add_momentum_indicators()
-    feature_generator.add_volatility_indicators()
-    feature_generator.add_lagged_returns()
-    
+    feature_generator.add_technical_indicators()
     data_with_features = feature_generator.get_feature_data()
 
-    # --- 2. Create Target and Prepare Data ---
-    print("\n" + "="*50)
-    print("STEP 2: Preparing Data for Model Training")
-    print("="*50)
-    
-    # Create target variable
+    # Flatten MultiIndex columns if present
+    if isinstance(data_with_features.columns, pd.MultiIndex):
+        data_with_features.columns = [
+            col if isinstance(col, str) else '_'.join([str(c) for c in col if c])
+            for col in data_with_features.columns.values
+        ]
+
+    # --- 2. Walk-Forward Optimization ---
+    print("Backtester: Starting Walk-Forward Analysis...")
     data_with_features['Future_Return'] = data_with_features['Returns'].shift(-1)
     data_with_features['Target'] = (data_with_features['Future_Return'] > 0).astype(int)
     data_with_features.dropna(inplace=True)
 
-    # Prepare feature matrix (X) and target vector (y)
     y = data_with_features['Target']
+    # Save a copy for backtesting before dropping columns
+    data_for_backtest = data_with_features.copy()
+
+    # Only drop columns for ML model input
     cols_to_drop = ['Open', 'High', 'Low', 'Close', 'Volume', 'Returns', 'Future_Return', 'Target']
-    X = data_with_features.drop(columns=cols_to_drop)
-
-    # --- 3. Train Model and Generate Predictions ---
-    print("\n" + "="*50)
-    print("STEP 3: Training Model and Generating Predictions")
-    print("="*50)
+    drop_cols = [col for col in data_with_features.columns for base in cols_to_drop if col.startswith(base)]
+    X = data_with_features.drop(columns=drop_cols)
     
-    # We train on the first 80% of the data to simulate a hold-out set,
-    # which is the period we will backtest on.
-    split_index = int(len(X) * 0.8)
-    X_train, X_test = X[:split_index], X[split_index:]
-    y_train, y_test = y[:split_index], y[split_index:]
+    # FIX: Sanitize column names for LightGBM
+    X.columns = sanitize_feature_names(X.columns)
 
-    print(f"Training model on data up to {X_train.index[-1].date()}...")
-    model = lgb.LGBMClassifier(random_state=42)
-    model.fit(X_train, y_train)
+    print(f"Sanitized X columns: {[repr(col) for col in X.columns]}")
+    print(f"X shape: {X.shape}, y shape: {y.shape}")
+    print("DEBUG: About to start walk-forward splits")
 
-    # Generate predictions for the entire dataset to pass to the backtester
-    # The backtester will then slice this data appropriately.
-    all_predictions = model.predict(X)
+    n_splits = 5
+    total_size = len(X)
+    split_size = total_size // n_splits
+    all_predictions = pd.Series(np.nan, index=X.index)
+
+    for i in range(1, n_splits):
+        print(f"DEBUG: Fold {i} starting")
+        train_end_index = i * split_size
+        test_start_index = train_end_index
+        test_end_index = (i + 1) * split_size if i < n_splits - 1 else total_size
+        
+        X_train, y_train = X.iloc[:train_end_index], y.iloc[:train_end_index]
+        X_test = X.iloc[test_start_index:test_end_index]
+
+        # Sanitize feature names for LightGBM compatibility
+        X_train.columns = sanitize_feature_names(X_train.columns)
+        X_test.columns = sanitize_feature_names(X_test.columns)
+
+        print(f"Fold {i} X_train columns: {[repr(col) for col in X_train.columns]}")
+        print(f"Fold {i} X_test columns: {[repr(col) for col in X_test.columns]}")
+
+        print(f"  Fold {i}: Training on {len(X_train)} samples, testing on {len(X_test)} samples...")
+        model = lgb.LGBMClassifier(random_state=42)
+        model.fit(X_train, y_train)
+        fold_predictions = model.predict(X_test)
+        all_predictions.iloc[test_start_index:test_end_index] = fold_predictions
+
     data_with_features['Predictions'] = all_predictions
+    backtest_data = data_with_features.dropna(subset=['Predictions'])
+
+    # Ensure data_for_backtest has the Predictions column for the same index
+    data_for_backtest['Predictions'] = all_predictions
     
-    # --- 4. Run the Backtest ---
-    print("\n" + "="*50)
-    print("STEP 4: Running Vectorized Backtest")
-    print("="*50)
+    # --- 3. Run the Backtest Simulation ---
+    print("\nBacktester: Running simulation...")
+    if backtest_data.empty:
+        return None, "Not enough data to run a walk-forward backtest."
 
-    # We will backtest on the "test" period, the last 20% of the data.
-    backtest_data = data_with_features[split_index:]
+    # Rename price columns to standard names for Backtest
+    for base in ['Open', 'High', 'Low', 'Close', 'Volume']:
+        price_col = [col for col in data_for_backtest.columns if col.startswith(base)]
+        if price_col:
+            data_for_backtest[base] = data_for_backtest[price_col[0]]
 
-    bt = Backtest(backtest_data, MLStrategy,
-                  cash=100_000, commission=.002)
-
+    # Use the preserved data_for_backtest (with price columns) for Backtest
+    bt = Backtest(data_for_backtest.loc[backtest_data.index], MLStrategy, cash=cash, commission=commission)
     stats = bt.run()
     
-    print("\nBacktest Results:")
-    print(stats)
-    
-    print("\nNOTE: The 'Equity Final' and 'Return [%]' are calculated only on the test period.")
-
-    # You can uncomment the line below to generate an interactive plot
-    # in a browser window.
-    # bt.plot()
-
-if __name__ == '__main__':
-    # To run this, you will need to install the backtesting.py library:
-    # pip install backtesting
-    run_backtest()
+    return stats, None
