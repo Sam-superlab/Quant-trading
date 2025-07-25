@@ -1,0 +1,1 @@
+# Placeholder for tests for data_fetcher 

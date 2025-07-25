@@ -1,0 +1,10 @@
+pandas
+numpy
+requests
+yfinance
+scikit-learn
+lightgbm
+backtesting
+alpaca-py
+streamlit
+urllib3
