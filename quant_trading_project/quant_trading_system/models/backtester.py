@@ -6,6 +6,7 @@ from backtesting import Backtest, Strategy
 from datetime import datetime, timedelta
 import numpy as np
 import re
+from sklearn.metrics import confusion_matrix
 
 # Import our existing modules
 from quant_trading_system.data.data_fetcher import DataFetcher
@@ -41,7 +42,7 @@ def run_backtest(ticker, cash, commission):
     print(f"Backtester: Running data pipeline for {ticker}...")
     market_data = fetcher.get_market_data(ticker, start_date=start_date, end_date=end_date)
     if market_data is None:
-        return None, "Could not fetch market data."
+        return None, None, None, "Could not fetch market data."
 
     clean_data = preprocessor.handle_missing_values(market_data, method='ffill')
     
@@ -82,6 +83,7 @@ def run_backtest(ticker, cash, commission):
     total_size = len(X)
     split_size = total_size // n_splits
     all_predictions = pd.Series(np.nan, index=X.index)
+    feature_totals = np.zeros(X.shape[1])
 
     for i in range(1, n_splits):
         print(f"DEBUG: Fold {i} starting")
@@ -102,6 +104,7 @@ def run_backtest(ticker, cash, commission):
         print(f"  Fold {i}: Training on {len(X_train)} samples, testing on {len(X_test)} samples...")
         model = lgb.LGBMClassifier(random_state=42, verbose=-1)
         model.fit(X_train, y_train)
+        feature_totals += model.feature_importances_
         fold_predictions = model.predict(X_test)
         all_predictions.iloc[test_start_index:test_end_index] = fold_predictions
 
@@ -114,7 +117,7 @@ def run_backtest(ticker, cash, commission):
     # --- 3. Run the Backtest Simulation ---
     print("\nBacktester: Running simulation...")
     if backtest_data.empty:
-        return None, "Not enough data to run a walk-forward backtest."
+        return None, None, None, "Not enough data to run a walk-forward backtest."
 
     # Rename price columns to standard names for Backtest
     for base in ['Open', 'High', 'Low', 'Close', 'Volume']:
@@ -125,5 +128,15 @@ def run_backtest(ticker, cash, commission):
     # Use the preserved data_for_backtest (with price columns) for Backtest
     bt = Backtest(data_for_backtest.loc[backtest_data.index], MLStrategy, cash=cash, commission=commission)
     stats = bt.run()
-    
-    return stats, None
+
+    # Calculate average feature importance across folds
+    feature_imp = pd.DataFrame({
+        'Feature': X.columns,
+        'Importance': feature_totals / (n_splits - 1)
+    }).sort_values(by='Importance', ascending=False)
+
+    # Compute confusion matrix of predictions vs. actuals
+    conf = confusion_matrix(backtest_data['Target'], backtest_data['Predictions'])
+    conf_df = pd.DataFrame(conf, index=['Actual 0', 'Actual 1'], columns=['Pred 0', 'Pred 1'])
+
+    return stats, feature_imp, conf_df, None
