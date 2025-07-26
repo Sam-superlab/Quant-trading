@@ -29,17 +29,21 @@ class EnhancedBacktester:
         self.stats = None
         self.trades_data = None
         self.equity_curve = None
+        self.feature_importance = None
+        self.confusion_matrix = None
         
     def run_backtest(self):
         """Run the backtest and collect detailed data"""
         try:
             # Run the original backtest
-            stats, error = run_backtest(self.ticker, self.cash, self.commission)
+            stats, feature_imp, conf_mat, error = run_backtest(self.ticker, self.cash, self.commission)
             
             if error:
                 return None, error
                 
             self.stats = stats
+            self.feature_importance = feature_imp
+            self.confusion_matrix = conf_mat
             
             # Extract additional data for visualization
             self._extract_trading_data()
@@ -443,6 +447,17 @@ class EnhancedBacktester:
         
         fig.update_layout(height=400, showlegend=False)
         st.plotly_chart(fig, use_container_width=True)
+
+        if self.confusion_matrix is not None:
+            st.subheader("📉 Confusion Matrix")
+            cm_fig = px.imshow(
+                self.confusion_matrix,
+                text_auto=True,
+                aspect="auto",
+                color_continuous_scale="Blues",
+                labels=dict(x="Predicted", y="Actual", color="Count")
+            )
+            st.plotly_chart(cm_fig, use_container_width=True)
     
     def _show_strategy_insights(self):
         """Show strategy insights and recommendations"""
@@ -547,5 +562,4 @@ def run_enhanced_backtest(ticker, cash=100000, commission=0.002):
     
     # Display the enhanced dashboard
     backtester.create_performance_dashboard()
-    
-    return stats, None 
+    return stats, None
