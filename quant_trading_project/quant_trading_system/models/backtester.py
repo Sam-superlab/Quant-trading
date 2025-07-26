@@ -6,6 +6,7 @@ from backtesting import Backtest, Strategy
 from datetime import datetime, timedelta
 import numpy as np
 import re
+from sklearn.metrics import confusion_matrix
 
 # Import our existing modules
 from quant_trading_system.data.data_fetcher import DataFetcher
@@ -41,7 +42,7 @@ def run_backtest(ticker, cash, commission):
     print(f"Backtester: Running data pipeline for {ticker}...")
     market_data = fetcher.get_market_data(ticker, start_date=start_date, end_date=end_date)
     if market_data is None:
-        return None, "Could not fetch market data."
+        return None, None, None, "Could not fetch market data."
 
     clean_data = preprocessor.handle_missing_values(market_data, method='ffill')
     
@@ -116,7 +117,7 @@ def run_backtest(ticker, cash, commission):
     # --- 3. Run the Backtest Simulation ---
     print("\nBacktester: Running simulation...")
     if backtest_data.empty:
-        return None, "Not enough data to run a walk-forward backtest."
+        return None, None, None, "Not enough data to run a walk-forward backtest."
 
     # Rename price columns to standard names for Backtest
     for base in ['Open', 'High', 'Low', 'Close', 'Volume']:
@@ -134,4 +135,10 @@ def run_backtest(ticker, cash, commission):
         'Importance': feature_totals / (n_splits - 1)
     }).sort_values(by='Importance', ascending=False)
 
-    return stats, feature_imp, None
+
+    # Compute confusion matrix of predictions vs. actuals
+    conf = confusion_matrix(backtest_data['Target'], backtest_data['Predictions'])
+    conf_df = pd.DataFrame(conf, index=['Actual 0', 'Actual 1'], columns=['Pred 0', 'Pred 1'])
+
+    return stats, feature_imp, conf_df, None
+

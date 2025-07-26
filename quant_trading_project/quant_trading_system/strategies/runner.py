@@ -27,6 +27,9 @@ def run_strategy(strategy: str, ticker: str, start: str, end: str, risk_pct: flo
             'pnl_curve': pnl,
             'stats': stats,
             'feature_importance': backtester.feature_importance,
+
+            'confusion_matrix': backtester.confusion_matrix,
+
             'trades': None,
             'data': None
         }
@@ -53,6 +56,9 @@ def run_strategy(strategy: str, ticker: str, start: str, end: str, risk_pct: flo
         'pnl_curve': stats._equity_curve['Equity'],
         'stats': stats,
         'feature_importance': None,
+
+        'confusion_matrix': None,
+
         'trades': stats._trades,
         'data': bt._data
     }
