@@ -82,6 +82,7 @@ def run_backtest(ticker, cash, commission):
     total_size = len(X)
     split_size = total_size // n_splits
     all_predictions = pd.Series(np.nan, index=X.index)
+    feature_totals = np.zeros(X.shape[1])
 
     for i in range(1, n_splits):
         print(f"DEBUG: Fold {i} starting")
@@ -102,6 +103,7 @@ def run_backtest(ticker, cash, commission):
         print(f"  Fold {i}: Training on {len(X_train)} samples, testing on {len(X_test)} samples...")
         model = lgb.LGBMClassifier(random_state=42, verbose=-1)
         model.fit(X_train, y_train)
+        feature_totals += model.feature_importances_
         fold_predictions = model.predict(X_test)
         all_predictions.iloc[test_start_index:test_end_index] = fold_predictions
 
@@ -125,5 +127,11 @@ def run_backtest(ticker, cash, commission):
     # Use the preserved data_for_backtest (with price columns) for Backtest
     bt = Backtest(data_for_backtest.loc[backtest_data.index], MLStrategy, cash=cash, commission=commission)
     stats = bt.run()
-    
-    return stats, None
+
+    # Calculate average feature importance across folds
+    feature_imp = pd.DataFrame({
+        'Feature': X.columns,
+        'Importance': feature_totals / (n_splits - 1)
+    }).sort_values(by='Importance', ascending=False)
+
+    return stats, feature_imp, None

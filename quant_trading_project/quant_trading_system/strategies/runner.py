@@ -1,18 +1,36 @@
 from datetime import datetime
-from typing import Dict, Tuple
+from typing import Dict, Any
 
 import pandas as pd
 
 from quant_trading_system.data.data_fetcher import DataFetcher
+from quant_trading_system.models.enhanced_backtester import EnhancedBacktester
 from .basic import run_sma_crossover, run_rsi_strategy
 
 
-def run_strategy(strategy: str, ticker: str, start: str, end: str, params: Dict) -> Tuple[object, dict]:
-    """Fetch data and run the selected strategy.
+def run_strategy(strategy: str, ticker: str, start: str, end: str, risk_pct: float, params: Dict) -> Dict[str, Any]:
+    """Fetch data and run the selected strategy returning useful artifacts."""
 
-    Returns a tuple of (Backtest object, stats dictionary).
-    """
     fetcher = DataFetcher()
+
+    if strategy == "ML Model":
+        backtester = EnhancedBacktester(ticker)
+        stats, error = backtester.run_backtest()
+        if error:
+            raise ValueError(error)
+
+        pnl = None
+        if backtester.equity_curve is not None:
+            pnl = backtester.equity_curve['Equity_Curve']
+
+        return {
+            'pnl_curve': pnl,
+            'stats': stats,
+            'feature_importance': backtester.feature_importance,
+            'trades': None,
+            'data': None
+        }
+
     data = fetcher.get_market_data(ticker, start, end)
     if data is None or data.empty:
         raise ValueError("No market data fetched")
@@ -31,4 +49,10 @@ def run_strategy(strategy: str, ticker: str, start: str, end: str, params: Dict)
     else:
         raise ValueError(f"Unknown strategy: {strategy}")
 
-    return bt, stats
+    return {
+        'pnl_curve': stats._equity_curve['Equity'],
+        'stats': stats,
+        'feature_importance': None,
+        'trades': stats._trades,
+        'data': bt._data
+    }

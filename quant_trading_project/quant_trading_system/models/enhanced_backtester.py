@@ -29,17 +29,19 @@ class EnhancedBacktester:
         self.stats = None
         self.trades_data = None
         self.equity_curve = None
+        self.feature_importance = None
         
     def run_backtest(self):
         """Run the backtest and collect detailed data"""
         try:
             # Run the original backtest
-            stats, error = run_backtest(self.ticker, self.cash, self.commission)
+            stats, feature_imp, error = run_backtest(self.ticker, self.cash, self.commission)
             
             if error:
                 return None, error
                 
             self.stats = stats
+            self.feature_importance = feature_imp
             
             # Extract additional data for visualization
             self._extract_trading_data()
@@ -547,5 +549,4 @@ def run_enhanced_backtest(ticker, cash=100000, commission=0.002):
     
     # Display the enhanced dashboard
     backtester.create_performance_dashboard()
-    
-    return stats, None 
+    return stats, None
