@@ -31,12 +31,15 @@ class ExecutionHandler:
         """
         Initializes the ExecutionHandler using alpaca-py.
         """
-        self.api_key = os.getenv('APCA_API_KEY_ID')
-        self.secret_key = os.getenv('APCA_API_SECRET_KEY')
+        # Import config here to avoid circular imports
+        from quant_trading_system.utils.config import config
+        
+        self.api_key = os.getenv('APCA_API_KEY_ID', config.APCA_API_KEY_ID)
+        self.secret_key = os.getenv('APCA_API_SECRET_KEY', config.APCA_API_SECRET_KEY)
         self.paper_trading = paper_trading
 
-        if not self.api_key or not self.secret_key:
-            raise ValueError("API keys not found. Please set APCA_API_KEY_ID and APCA_API_SECRET_KEY environment variables.")
+        if not self.api_key or not self.secret_key or self.api_key == 'YOUR_KEY_ID_HERE':
+            raise ValueError("API keys not found. Please set APCA_API_KEY_ID and APCA_API_SECRET_KEY environment variables or update config.py.")
 
         print("Connecting to Alpaca via modern `alpaca-py` library...")
         try:

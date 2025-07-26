@@ -90,3 +90,11 @@ Thumbs.db
 # Local environment variables
 .env
 .env.* 
+
+# Test files
+test_api_connection.py
+test_alpaca_connection.py
+test_enhanced_backtest.py
+debug_stats_keys.py
+debug_backtest.py
+tests/

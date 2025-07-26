@@ -14,9 +14,9 @@ class DataPreprocessor:
         Handles missing values in a DataFrame.
         """
         if method == 'ffill':
-            return df.fillna(method='ffill')
+            return df.ffill()
         elif method == 'bfill':
-            return df.fillna(method='bfill')
+            return df.bfill()
         elif method == 'drop':
             return df.dropna()
         elif method == 'mean':
@@ -77,11 +77,29 @@ class DataPreprocessor:
                     return item.get('value', np.nan)
             return np.nan
 
-        statement_type = 'is'  # Default to income statement
+        # Try different statement types for different concepts
+        concept_to_statement = {
+            'QuarterlyRevenue': 'is',  # Income statement
+            'QuarterlyNetIncome': 'is',  # Income statement
+            'TotalAssets': 'bs',  # Balance sheet
+            'TotalLiabilities': 'bs',  # Balance sheet
+            'CashAndCashEquivalents': 'bs',  # Balance sheet
+        }
+        
         for col in fundamental_cols:
+            statement_type = concept_to_statement.get(col, 'is')  # Default to income statement
             fundamental_df_copy[col] = fundamental_df_copy['report'].apply(
                 lambda report: extract_value(report, statement_type, col)
             )
+            
+        # Debug: Print extracted values
+        print("Extracted fundamental values:")
+        for col in fundamental_cols:
+            if col in fundamental_df_copy.columns:
+                non_null_count = fundamental_df_copy[col].notna().sum()
+                print(f"  {col}: {non_null_count} non-null values out of {len(fundamental_df_copy)}")
+                if non_null_count > 0:
+                    print(f"    Sample values: {fundamental_df_copy[col].dropna().head(3).tolist()}")
         
         fundamental_subset = fundamental_df_copy[fundamental_cols]
         

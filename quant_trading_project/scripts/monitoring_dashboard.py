@@ -6,6 +6,54 @@ import lightgbm as lgb
 from datetime import datetime, timedelta
 import os
 import sys
+import numpy as np
+
+def clean_dataframe_for_streamlit(df):
+    """
+    Clean DataFrame or Series to be compatible with Streamlit's Arrow backend.
+    Converts timedelta columns and other problematic types.
+    """
+    # Handle Series by converting to DataFrame
+    if isinstance(df, pd.Series):
+        df_clean = df.to_frame()
+        is_series = True
+    else:
+        df_clean = df.copy()
+        is_series = False
+    
+    # Process DataFrame columns
+    if hasattr(df_clean, 'columns'):
+        for col in df_clean.columns:
+            # Convert timedelta columns to total seconds
+            if df_clean[col].dtype == 'timedelta64[ns]':
+                df_clean[col] = df_clean[col].dt.total_seconds()
+            # Convert object columns that might contain timedeltas
+            elif df_clean[col].dtype == 'object':
+                # Check if the column contains timedelta objects
+                sample_values = df_clean[col].dropna().head(10)
+                if len(sample_values) > 0 and any('timedelta' in str(type(val)) for val in sample_values):
+                    try:
+                        df_clean[col] = pd.to_timedelta(df_clean[col]).dt.total_seconds()
+                    except:
+                        # If conversion fails, convert to string
+                        df_clean[col] = df_clean[col].astype(str)
+    else:
+        # Handle Series case
+        if df_clean.dtype == 'timedelta64[ns]':
+            df_clean = df_clean.dt.total_seconds()
+        elif df_clean.dtype == 'object':
+            sample_values = df_clean.dropna().head(10)
+            if len(sample_values) > 0 and any('timedelta' in str(type(val)) for val in sample_values):
+                try:
+                    df_clean = pd.to_timedelta(df_clean).dt.total_seconds()
+                except:
+                    df_clean = df_clean.astype(str)
+    
+    # If original was a Series, return as Series
+    if is_series:
+        return df_clean.iloc[:, 0] if hasattr(df_clean, 'columns') else df_clean
+    else:
+        return df_clean
 
 # --- Path Fix ---
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -19,7 +67,7 @@ from quant_trading_system.data.data_preprocessor import DataPreprocessor
 from quant_trading_system.features.feature_engineering import FeatureEngineering
 from quant_trading_system.execution.execution_handler import ExecutionHandler
 from quant_trading_system.risk.risk_manager import RiskManager
-from quant_trading_system.models.backtester import run_backtest
+from quant_trading_system.models.enhanced_backtester import run_enhanced_backtest
 from quant_trading_system.utils.config import config
 
 def run_strategy_pipeline(ticker, start_date, end_date):
@@ -65,8 +113,8 @@ def run_strategy_pipeline(ticker, start_date, end_date):
     logs.append(f"Data date range: {data_with_features.index.min()} to {data_with_features.index.max()}")
     logs.append(f"Today's date: {datetime.now().date()}")
     
-    data_with_features['Future_Return'] = data_with_features['Returns'].shift(-1)
-    data_with_features['Target'] = (data_with_features['Future_Return'] > 0).astype(int)
+    data_with_features.loc[:, 'Future_Return'] = data_with_features['Returns'].shift(-1)
+    data_with_features.loc[:, 'Target'] = (data_with_features['Future_Return'] > 0).astype(int)
     
     # Check if we have data for today or the most recent trading day
     latest_date = data_with_features.index.max()
@@ -108,6 +156,9 @@ def run_strategy_pipeline(ticker, start_date, end_date):
     X_train = training_data.drop(columns=existing_cols_to_drop)
     X_predict = data_to_predict.drop(columns=existing_cols_to_drop)
 
+    # Debug: Log original column names
+    logs.append(f"Original X_train columns: {list(X_train.columns)}")
+    
     # Sanitize feature names for LightGBM
     def sanitize_column(col):
         return (
@@ -124,12 +175,36 @@ def run_strategy_pipeline(ticker, start_date, end_date):
         )
     X_train.columns = [sanitize_column(col) for col in X_train.columns]
     X_predict.columns = [sanitize_column(col) for col in X_predict.columns]
+    
+    # Debug: Log sanitized column names
+    logs.append(f"Sanitized X_train columns: {list(X_train.columns)}")
+    logs.append(f"X_train shape: {X_train.shape}")
+    logs.append(f"y_train shape: {y_train.shape}")
+    logs.append(f"y_train value counts: {y_train.value_counts().to_dict()}")
 
     if X_predict.empty:
         logs.append("Warning: No data available for today's prediction.")
         return {'logs': logs, 'status': 'No Prediction', 'data': data_with_features}
 
-    model = lgb.LGBMClassifier(random_state=42)
+    # Validate training data
+    if X_train.empty or y_train.empty:
+        logs.append("Error: No training data available.")
+        return {'logs': logs, 'status': 'Error', 'data': data_with_features}
+    
+    if len(X_train) < 10:  # Need at least 10 samples for meaningful training
+        logs.append("Error: Insufficient training data (less than 10 samples).")
+        return {'logs': logs, 'status': 'Error', 'data': data_with_features}
+    
+    # Check for class imbalance
+    class_counts = y_train.value_counts()
+    if len(class_counts) < 2:
+        logs.append("Error: Only one class present in training data.")
+        return {'logs': logs, 'status': 'Error', 'data': data_with_features}
+    
+    logs.append(f"Training data shape: {X_train.shape}")
+    logs.append(f"Class distribution: {class_counts.to_dict()}")
+
+    model = lgb.LGBMClassifier(random_state=42, verbose=-1)  # Suppress LightGBM warnings
     model.fit(X_train, y_train)
 
     prediction_proba = model.predict_proba(X_predict)
@@ -206,9 +281,9 @@ with col1:
 
 with col2:
     st.header("Backtesting")
-    if st.button("🔍 Run Backtest"):
-        with st.spinner("Running historical backtest..."):
-            stats, error = run_backtest(ticker_input, config.BACKTEST_CASH, config.BACKTEST_COMMISSION)
+    if st.button("🔍 Run Enhanced Backtest"):
+        with st.spinner("Running enhanced historical backtest..."):
+            stats, error = run_enhanced_backtest(ticker_input, config.BACKTEST_CASH, config.BACKTEST_COMMISSION)
             if error:
                 st.error(error)
             else:
@@ -228,14 +303,17 @@ if 'results' in st.session_state:
         st.text_area("Logs", "".join(f"{log}\n" for log in results['logs']), height=250)
         
         st.subheader("Price vs. VWAP Chart")
+        # Clean DataFrame before processing to avoid Arrow errors
+        clean_data = clean_dataframe_for_streamlit(results['data'])
+        
         # Flatten MultiIndex columns if present
-        if isinstance(results['data'].columns, pd.MultiIndex):
-            results['data'].columns = ['_'.join([str(c) for c in col if c and c != '']) for col in results['data'].columns]
+        if isinstance(clean_data.columns, pd.MultiIndex):
+            clean_data.columns = ['_'.join([str(c) for c in col if c and c != '']) for col in clean_data.columns]
         
         # Find the correct column names after flattening
         close_col = None
         vwap_col = None
-        for col in results['data'].columns:
+        for col in clean_data.columns:
             if 'Close' in col:
                 close_col = col
             elif 'VWAP_14' in col:
@@ -243,44 +321,70 @@ if 'results' in st.session_state:
         
         # Plot Close price and the new VWAP indicator
         if close_col and vwap_col:
-            chart_data = results['data'][[close_col, vwap_col]].tail(200) # Plot last 200 days
+            chart_data = clean_data[[close_col, vwap_col]].tail(200) # Plot last 200 days
             st.line_chart(chart_data)
         else:
             st.warning("Could not find Close or VWAP_14 columns for plotting")
-            st.write("Available columns:", list(results['data'].columns))
+            st.write("Available columns:", list(clean_data.columns))
 
     with res_col2:
         if results['status'] == 'Signal Generated':
             st.subheader("Model's Reasoning (Feature Importance)")
-            st.bar_chart(results['feature_importance'].sort_values('Value', ascending=False).head(10).set_index('Feature'))
+            # Clean feature importance DataFrame before displaying
+            clean_feature_imp = clean_dataframe_for_streamlit(results['feature_importance'])
+            st.bar_chart(clean_feature_imp.sort_values('Value', ascending=False).head(10).set_index('Feature'))
 
             # --- Trade Execution Logic ---
             st.subheader("Trade Decision")
             if results['probability'] > confidence_input:
                 st.success(f"Signal is BUY (Confidence: {results['probability']:.2%})")
-                try:
-                    execution_handler = ExecutionHandler(paper_trading=config.PAPER_TRADING)
-                    account_info = execution_handler.get_account_info()
+                
+                # Check if Alpaca API keys are configured
+                alpaca_key = os.getenv('APCA_API_KEY_ID', config.APCA_API_KEY_ID)
+                alpaca_secret = os.getenv('APCA_API_SECRET_KEY', config.APCA_API_SECRET_KEY)
+                
+                if alpaca_key and alpaca_secret and alpaca_key != 'YOUR_KEY_ID_HERE':
+                    try:
+                        execution_handler = ExecutionHandler(paper_trading=config.PAPER_TRADING)
+                        account_info = execution_handler.get_account_info()
+                        
+                        if account_info:
+                            equity_placeholder.metric("Account Equity", f"${float(account_info.equity):,.2f}")
+                            status_placeholder.success(f"Connected: {account_info.status}")
+                            risk_manager = RiskManager(equity=float(account_info.equity))
+                            
+                            data_to_predict = results['data_to_predict']
+                            current_price = data_to_predict['Close'].iloc[0]
+                            atr = data_to_predict['ATR'].iloc[0]
+                            stop_loss_price = current_price - (2 * atr)
+                            take_profit_price = current_price + (1.5 * (current_price - stop_loss_price))
+                            
+                            st.info("Live trading execution is commented out for safety.")
+                        else:
+                            status_placeholder.error("Connection Failed")
+                    except Exception as e:
+                        st.error(f"Execution Error: {e}")
+                else:
+                    # Show demo mode when Alpaca keys are not configured
+                    st.info("🔧 Demo Mode: Alpaca API keys not configured")
+                    st.write("To enable live trading, set your Alpaca API keys:")
+                    st.code("export APCA_API_KEY_ID=your_key_id")
+                    st.code("export APCA_API_SECRET_KEY=your_secret_key")
                     
-                    if account_info:
-                        equity_placeholder.metric("Account Equity", f"${float(account_info.equity):,.2f}")
-                        status_placeholder.success(f"Connected: {account_info.status}")
-                        risk_manager = RiskManager(equity=float(account_info.equity))
-                        
-                        data_to_predict = results['data_to_predict']
-                        current_price = data_to_predict['Close'].iloc[0]
-                        atr = data_to_predict['ATR'].iloc[0]
-                        stop_loss_price = current_price - (2 * atr)
-                        take_profit_price = current_price + (1.5 * (current_price - stop_loss_price))
-                        
-                        st.info("Live trading execution is commented out for safety.")
-                    else:
-                        status_placeholder.error("Connection Failed")
-                except Exception as e:
-                    st.error(f"Execution Error: {e}")
+                    # Show demo trade parameters
+                    data_to_predict = results['data_to_predict']
+                    current_price = data_to_predict['Close'].iloc[0]
+                    atr = data_to_predict['ATR'].iloc[0]
+                    stop_loss_price = current_price - (2 * atr)
+                    take_profit_price = current_price + (1.5 * (current_price - stop_loss_price))
+                    
+                    st.write("**Demo Trade Parameters:**")
+                    st.write(f"- Entry Price: ${current_price:.2f}")
+                    st.write(f"- Stop Loss: ${stop_loss_price:.2f}")
+                    st.write(f"- Take Profit: ${take_profit_price:.2f}")
+                    st.write(f"- ATR: ${atr:.2f}")
             else:
                 st.warning(f"Signal is HOLD (Confidence is below threshold)")
 
-if 'backtest_stats' in st.session_state:
-    st.header("Backtest Results")
-    st.dataframe(st.session_state['backtest_stats'])
+# Enhanced backtest results are displayed within the enhanced_backtester module
+# The old simple display is replaced with comprehensive visualization tabs

@@ -58,8 +58,8 @@ def run_backtest(ticker, cash, commission):
 
     # --- 2. Walk-Forward Optimization ---
     print("Backtester: Starting Walk-Forward Analysis...")
-    data_with_features['Future_Return'] = data_with_features['Returns'].shift(-1)
-    data_with_features['Target'] = (data_with_features['Future_Return'] > 0).astype(int)
+    data_with_features.loc[:, 'Future_Return'] = data_with_features['Returns'].shift(-1)
+    data_with_features.loc[:, 'Target'] = (data_with_features['Future_Return'] > 0).astype(int)
     data_with_features.dropna(inplace=True)
 
     y = data_with_features['Target']
@@ -74,7 +74,7 @@ def run_backtest(ticker, cash, commission):
     # FIX: Sanitize column names for LightGBM
     X.columns = sanitize_feature_names(X.columns)
 
-    print(f"Sanitized X columns: {[repr(col) for col in X.columns]}")
+    print(f"Sanitized X columns: {list(X.columns)}")
     print(f"X shape: {X.shape}, y shape: {y.shape}")
     print("DEBUG: About to start walk-forward splits")
 
@@ -96,16 +96,16 @@ def run_backtest(ticker, cash, commission):
         X_train.columns = sanitize_feature_names(X_train.columns)
         X_test.columns = sanitize_feature_names(X_test.columns)
 
-        print(f"Fold {i} X_train columns: {[repr(col) for col in X_train.columns]}")
-        print(f"Fold {i} X_test columns: {[repr(col) for col in X_test.columns]}")
+        print(f"Fold {i} X_train columns: {list(X_train.columns)}")
+        print(f"Fold {i} X_test columns: {list(X_test.columns)}")
 
         print(f"  Fold {i}: Training on {len(X_train)} samples, testing on {len(X_test)} samples...")
-        model = lgb.LGBMClassifier(random_state=42)
+        model = lgb.LGBMClassifier(random_state=42, verbose=-1)
         model.fit(X_train, y_train)
         fold_predictions = model.predict(X_test)
         all_predictions.iloc[test_start_index:test_end_index] = fold_predictions
 
-    data_with_features['Predictions'] = all_predictions
+    data_with_features.loc[:, 'Predictions'] = all_predictions
     backtest_data = data_with_features.dropna(subset=['Predictions'])
 
     # Ensure data_for_backtest has the Predictions column for the same index

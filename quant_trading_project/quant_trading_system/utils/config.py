@@ -12,8 +12,8 @@ class Config:
     FINNHUB_API_KEY = os.getenv('FINNHUB_API_KEY', "d21bk3pr01qkdupiodggd21bk3pr01qkdupiodh0")
 
     # --- Alpaca API Keys (prioritizes environment variables) ---
-    APCA_API_KEY_ID = os.getenv('APCA_API_KEY_ID', 'YOUR_KEY_ID_HERE')
-    APCA_API_SECRET_KEY = os.getenv('APCA_API_SECRET_KEY', 'YOUR_SECRET_KEY_HERE')
+    APCA_API_KEY_ID = os.getenv('APCA_API_KEY_ID', 'PK118EYMNJDA4352MEXH')
+    APCA_API_SECRET_KEY = os.getenv('APCA_API_SECRET_KEY', '5WxwMbB9j2q3pBNms0Yur2DfA3vqSft6s9XwQwxR')
     # Set to False for live trading
     PAPER_TRADING = True
 
@@ -39,8 +39,10 @@ def sanitize_feature_names(columns):
     """
     sanitized = []
     for col in columns:
+        # Remove quotes if present
+        col_str = str(col).strip("'\"")
         # Replace non-alphanumeric with underscore, collapse multiple underscores, strip
-        new_col = re.sub(r'[^0-9a-zA-Z]+', '_', str(col))
+        new_col = re.sub(r'[^0-9a-zA-Z]+', '_', col_str)
         new_col = new_col.strip('_')
         if not new_col or new_col[0].isdigit():
             new_col = 'f_' + new_col
