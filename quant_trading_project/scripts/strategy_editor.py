@@ -31,6 +31,7 @@ if run:
             st.success("Backtest completed")
             st.write(result['stats'])
 
+
             if result['stats'] is not None:
                 col1, col2, col3 = st.columns(3)
                 with col1:
@@ -40,6 +41,7 @@ if run:
                 with col3:
                     sr = result['stats'].get('Sharpe Ratio', 0.0)
                     st.metric("Sharpe Ratio", f"{sr:.2f}")
+
 
             if result['data'] is not None:
                 import plotly.graph_objects as go
@@ -57,6 +59,7 @@ if run:
                 fig = px.line(result['pnl_curve'], title='Equity Curve')
                 st.plotly_chart(fig, use_container_width=True)
 
+
             if result.get('confusion_matrix') is not None:
                 import plotly.express as px
                 cm_fig = px.imshow(
@@ -67,6 +70,7 @@ if run:
                     labels=dict(x="Predicted", y="Actual", color="Count")
                 )
                 st.plotly_chart(cm_fig, use_container_width=True)
+
 
             if result['feature_importance'] is not None:
                 st.write("### Top Features")

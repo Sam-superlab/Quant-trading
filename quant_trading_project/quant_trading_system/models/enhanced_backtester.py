@@ -31,19 +31,24 @@ class EnhancedBacktester:
         self.equity_curve = None
         self.feature_importance = None
         self.confusion_matrix = None
+
         
     def run_backtest(self):
         """Run the backtest and collect detailed data"""
         try:
             # Run the original backtest
+
             stats, feature_imp, conf_mat, error = run_backtest(self.ticker, self.cash, self.commission)
+
             
             if error:
                 return None, error
                 
             self.stats = stats
             self.feature_importance = feature_imp
+
             self.confusion_matrix = conf_mat
+
             
             # Extract additional data for visualization
             self._extract_trading_data()

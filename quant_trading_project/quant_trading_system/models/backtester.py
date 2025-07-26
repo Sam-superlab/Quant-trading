@@ -135,8 +135,10 @@ def run_backtest(ticker, cash, commission):
         'Importance': feature_totals / (n_splits - 1)
     }).sort_values(by='Importance', ascending=False)
 
+
     # Compute confusion matrix of predictions vs. actuals
     conf = confusion_matrix(backtest_data['Target'], backtest_data['Predictions'])
     conf_df = pd.DataFrame(conf, index=['Actual 0', 'Actual 1'], columns=['Pred 0', 'Pred 1'])
 
     return stats, feature_imp, conf_df, None
+
